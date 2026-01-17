@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Watch Together (Local File)</title>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin-top: 30px;
+    }
+
+    video {
+      width: 75%;
+      margin-top: 20px;
+      background: black;
+    }
+
+    #fileBox {
+      margin-bottom: 20px;
+    }
+
+    #clickToPlay {
+      display: none;
+      margin: 20px auto;
+      padding: 15px;
+      width: 260px;
+      background: #ffeb3b;
+      font-weight: bold;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+
+<h2>Watch Together (Local File)</h2>
+
+<div id="fileBox">
+  <input type="file" id="videoFile" accept="video/*" />
+</div>
+
+<div id="clickToPlay">Click to start synced playback</div>
+
+<video id="player" controls></video>
+
+<script>
+  const video = document.getElementById("player");
+  const videoFile = document.getElementById("videoFile");
+  const clickToPlay = document.getElementById("clickToPlay");
+
+  let ws;
+  let userInteracted = false;
+  let applyingRemoteUpdate = false;
+
+  /* =======================
+     SAFE PLAY
+     ======================= */
+  function safePlay() {
+    if (!userInteracted) return;
+    video.play().catch(() => {});
+  }
+
+  /* =======================
+     START PLAYER + SYNC
+     ======================= */
+  function startPlayer(file, roomId) {
+    // Convert local file to video URL
+    video.src = URL.createObjectURL(file);
+
+    // Show click-to-play for autoplay
+    clickToPlay.style.display = "block";
+    clickToPlay.onclick = () => {
+      userInteracted = true;
+      clickToPlay.style.display = "none";
+      safePlay();
+    };
+
+    // Connect WebSocket
+    const protocol = location.protocol === "https:" ? "wss" : "ws";
+    ws = new WebSocket(`${protocol}://${location.host}?room=${roomId}`);
+
+    // Send local events
+    video.onplay = () => {
+      if (applyingRemoteUpdate) return;
+      ws.send(JSON.stringify({ type: "play", time: video.currentTime }));
+    };
+
+    video.onpause = () => {
+      if (applyingRemoteUpdate) return;
+      ws.send(JSON.stringify({ type: "pause", time: video.currentTime }));
+    };
+
+    video.onseeked = () => {
+      if (applyingRemoteUpdate) return;
+      ws.send(JSON.stringify({ type: "seek", time: video.currentTime }));
+    };
+
+    // Receive remote events
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      applyingRemoteUpdate = true;
+
+      if (msg.type === "play") {
+        video.currentTime = msg.time;
+        safePlay();
+      }
+
+      if (msg.type === "pause") {
+        video.currentTime = msg.time;
+        video.pause();
+      }
+
+      if (msg.type === "seek") {
+        video.currentTime = msg.time;
+      }
+
+      setTimeout(() => applyingRemoteUpdate = false, 50);
+    };
+  }
+
+  /* =======================
+     FILE SELECTION
+     ======================= */
+  videoFile.addEventListener("change", () => {
+    const file = videoFile.files[0];
+    if (!file) return;
+
+    const roomId = new URLSearchParams(location.search).get("room") || "default";
+    startPlayer(file, roomId);
+  });
+
+</script>
+
+</body>
+</html>
